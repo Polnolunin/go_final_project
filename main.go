@@ -40,11 +40,6 @@ func main() {
 		Handler: mux,
 	}
 
-	//http.Handle("/", http.FileServer(http.Dir("./web")))
-	//http.HandleFunc("/api/nextdate", handler.NextDateHandl)
-	//http.HandleFunc("/api/task", handler.TaskHandler)
-	//http.HandleFunc("/api/tasks", handler.TasksGet)
-	//http.HandleFunc("/api/task/done", handler.TaskDone)
 
 	log.Println("запуск сервера: http://localhost:" + port + "/")
 	err = server.ListenAndServe()
