@@ -1,4 +1,4 @@
-package models
+package task
 
 type Task struct {
 	ID      string `json:"id"`
@@ -7,3 +7,7 @@ type Task struct {
 	Repeat  string `json:"repeat"`
 	Comment string `json:"comment"`
 }
+
+const (
+	FileDB = "/app/scheduler.db"
+)
