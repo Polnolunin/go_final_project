@@ -9,5 +9,5 @@ type Task struct {
 }
 
 const (
-	FileDB = "/app/scheduler.db"
+	FileDB = "scheduler.db"
 )

@@ -74,6 +74,11 @@ func TasksGet(w http.ResponseWriter, req *http.Request) {
 		tasks["tasks"] = append(tasks["tasks"], task)
 	}
 
+	if err := rows.Err(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if tasks["tasks"] == nil {
 		tasks["tasks"] = []task.Task{}
 	}

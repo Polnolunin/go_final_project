@@ -20,11 +20,13 @@ func CheckDB() error {
 	}
 
 	dbFile := filepath.Join(filepath.Dir(appPath), task.FileDB)
-	_, err = os.Stat(dbFile)
 
-	var install bool
-	if err != nil {
-		install = true
+	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+		file, err := os.Create(dbFile)
+		if err != nil {
+			return fmt.Errorf("ошибка создания файла базы данных: %v", err)
+		}
+		file.Close()
 	}
 
 	db, err := sql.Open("sqlite", dbFile)
@@ -33,20 +35,22 @@ func CheckDB() error {
 	}
 	defer db.Close()
 
-	if install {
-		statement, err := db.Prepare(`CREATE TABLE IF NOT EXISTS scheduler 
-		(id INTEGER PRIMARY KEY AUTOINCREMENT,
-		date CHAR(8) NOT NULL DEFAULT "",
-   		title VARCHAR(128) NOT NULL DEFAULT "",
-   		comment TEXT NOT NULL DEFAULT "",
-  		repeat VARCHAR(128) NOT NULL DEFAULT "");
+	statement, err := db.Prepare(`CREATE TABLE IF NOT EXISTS scheduler 
+	(id INTEGER PRIMARY KEY AUTOINCREMENT,
+	date CHAR(8) NOT NULL DEFAULT "",
+	title VARCHAR(128) NOT NULL DEFAULT "",
+	comment TEXT NOT NULL DEFAULT "",
+	repeat VARCHAR(128) NOT NULL DEFAULT "");
 
-		CREATE INDEX IF NOT EXISTS date_indx ON scheduler (date);
-		`)
-		if err != nil {
-			return fmt.Errorf("ошибка создания базы данных. %v", err)
-		}
-		statement.Exec()
+	CREATE INDEX IF NOT EXISTS date_indx ON scheduler (date);
+	`)
+	if err != nil {
+		return fmt.Errorf("ошибка создания базы данных: %v", err)
 	}
+	_, err = statement.Exec()
+	if err != nil {
+		return fmt.Errorf("ошибка выполнения SQL-запроса: %v", err)
+	}
+
 	return nil
 }

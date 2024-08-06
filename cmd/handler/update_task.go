@@ -68,7 +68,7 @@ func TaskID(db *sql.DB, id string) ([]byte, int, error) {
 		return []byte{}, http.StatusInternalServerError, err
 	}
 
-	return result, http.StatusBadRequest, nil
+	return result, http.StatusOK, nil
 }
 
 func UptadeTaskID(db *sql.DB, req *http.Request) ([]byte, int, error) {
