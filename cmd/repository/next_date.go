@@ -1,4 +1,4 @@
-package handler
+package repository
 
 import (
 	"go_final_project/cmd/date"
