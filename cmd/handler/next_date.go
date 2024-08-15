@@ -1,9 +1,10 @@
 package handler
 
 import (
-	"go_final_project/cmd/date"
 	"net/http"
 	"time"
+
+	"go_final_project/cmd/date"
 
 	_ "modernc.org/sqlite"
 )
@@ -28,5 +29,10 @@ func NextDateHandl(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	w.Write([]byte(nextDay))
+	_, writeErr := w.Write([]byte(nextDay))
+	if writeErr != nil {
+		http.Error(w, writeErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
 }

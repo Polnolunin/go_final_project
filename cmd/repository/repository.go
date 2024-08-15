@@ -2,14 +2,17 @@ package repository
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"fmt"
+	"strconv"
+	"time"
+
 	"go_final_project/cmd/date"
 	"go_final_project/cmd/task"
-	"net/http"
-	"time"
+
+	_ "modernc.org/sqlite"
 )
+
+var ErrTaskNotFound = errors.New("задача не найдена")
 
 type Repository struct {
 	db *sql.DB
@@ -19,65 +22,55 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) AddTask(req *http.Request) ([]byte, int, error) {
-	var resp struct {
-		Id int64 `json:"id"`
-	}
-
-	task, ResponseStatus, err := CheckTask(req)
-	if err != nil {
-		return []byte{}, ResponseStatus, err
-	}
+func (r *Repository) AddTask(t task.Task) (task.Task, error) {
 
 	result, err := r.db.Exec(`INSERT INTO scheduler (date, title, comment, repeat)
-		VALUES (:date, :title, :comment, :repeat)`,
-		sql.Named("date", task.Date),
-		sql.Named("title", task.Title),
-		sql.Named("comment", task.Comment),
-		sql.Named("repeat", task.Repeat),
+        VALUES (:date, :title, :comment, :repeat)`,
+		sql.Named("date", t.Date),
+		sql.Named("title", t.Title),
+		sql.Named("comment", t.Comment),
+		sql.Named("repeat", t.Repeat),
 	)
 	if err != nil {
-		return []byte{}, http.StatusInternalServerError, err
+		return task.Task{}, err
 	}
+
 	id, err := result.LastInsertId()
 	if err != nil {
-		return []byte{}, http.StatusInternalServerError, err
+		return task.Task{}, err
 	}
 
-	resp.Id = id
-
-	idResult, err := json.Marshal(resp)
-	if err != nil {
-		return []byte{}, http.StatusInternalServerError, err
-	}
-	return idResult, http.StatusOK, nil
+	t.ID = strconv.FormatInt(id, 10)
+	return t, nil
 }
 
-func (r *Repository) DeleteTask(id string) (int, error) {
-	task, err := r.db.Exec("DELETE FROM scheduler WHERE id = :id", sql.Named("id", id))
+func (r *Repository) DeleteTask(id string) error {
+	result, err := r.db.Exec("DELETE FROM scheduler WHERE id = ?", id)
 	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf(`{"error":"%s"}`, err)
+		return err
 	}
 
-	rowsAffected, err := task.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return err
 	}
 
 	if rowsAffected == 0 {
-		return http.StatusBadRequest, errors.New(`{"error":"задача не найдена"}`)
+		return ErrTaskNotFound
 	}
-	return http.StatusOK, nil
+
+	return nil
 }
 
-func (r *Repository) TaskDone(id string) (int, error) {
+func (r *Repository) TaskDone(id string) error {
 	var taskID task.Task
 
-	row := r.db.QueryRow("SELECT * FROM scheduler WHERE id = :id", sql.Named("id", id))
-
-	err := row.Scan(&taskID.ID, &taskID.Date, &taskID.Title, &taskID.Comment, &taskID.Repeat)
+	err := r.db.QueryRow("SELECT * FROM scheduler WHERE id = ?", id).Scan(&taskID.ID, &taskID.Date, &taskID.Title, &taskID.Comment, &taskID.Repeat)
 	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf(`{"error":"writing date %v"}`, err)
+		if err == sql.ErrNoRows {
+			return ErrTaskNotFound
+		}
+		return err
 	}
 
 	if taskID.Repeat == "" {
@@ -87,45 +80,42 @@ func (r *Repository) TaskDone(id string) (int, error) {
 	now := time.Now()
 	dataNew, err := date.NextDate(now, taskID.Date, taskID.Repeat)
 	if err != nil {
-		return http.StatusBadRequest, err
+		return err
 	}
 
-	res, err := r.db.Exec(`UPDATE scheduler SET date = :date WHERE id = :id`,
-		sql.Named("date", dataNew),
-		sql.Named("id", taskID.ID))
+	result, err := r.db.Exec(`UPDATE scheduler SET date = ? WHERE id = ?`, dataNew, taskID.ID)
 	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf(`{"error":"task is not found %v"}`, err)
+		return err
 	}
 
-	result, err := res.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf(`{"error":"task is not found %v"}`, err)
-	}
-	if result == 0 {
-		return http.StatusBadRequest, errors.New(`{"error":"task is not found"}`)
+		return err
 	}
 
-	return http.StatusOK, nil
+	if rowsAffected == 0 {
+		return ErrTaskNotFound
+	}
+
+	return nil
 }
 
-func (r *Repository) GetTasks(search string) ([]task.Task, int, error) {
+func (r *Repository) GetTasks(search string) ([]task.Task, error) {
 	var tasks []task.Task
-
 	var rows *sql.Rows
 	var err error
 
 	if search != "" {
 		rows, err = r.db.Query(`SELECT id, date, title, comment, repeat FROM scheduler
-		WHERE title LIKE :search OR comment LIKE :search OR date = :date ORDER BY date LIMIT 20`,
-			sql.Named("search", "%"+search+"%"),
-			sql.Named("date", search))
+        WHERE title LIKE ? OR comment LIKE ? OR date = ? ORDER BY date LIMIT 20`,
+			"%"+search+"%", "%"+search+"%", search)
 	} else {
 		rows, err = r.db.Query(`SELECT id, date, title, comment, repeat FROM scheduler 
-		ORDER BY date LIMIT 20`)
+        ORDER BY date LIMIT 20`)
 	}
 
 	if err != nil {
-		return nil, http.StatusInternalServerError, err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -133,64 +123,51 @@ func (r *Repository) GetTasks(search string) ([]task.Task, int, error) {
 		var task task.Task
 		err := rows.Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 		if err != nil {
-			return nil, http.StatusInternalServerError, err
+			return nil, err
 		}
 		tasks = append(tasks, task)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, http.StatusInternalServerError, err
+	if tasks == nil {
+		tasks = []task.Task{}
 	}
 
-	return tasks, http.StatusOK, nil
+	return tasks, rows.Err()
 }
 
-func (r *Repository) TaskID(id string) ([]byte, int, error) {
-	var task task.Task
+func (r *Repository) TaskID(id string) (task.Task, error) {
+	var t task.Task
 
-	row := r.db.QueryRow("SELECT id, date, title, comment, repeat FROM scheduler WHERE id = :id",
-		sql.Named("id", id))
-
-	err := row.Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
+	err := r.db.QueryRow("SELECT id, date, title, comment, repeat FROM scheduler WHERE id = ?", id).Scan(&t.ID, &t.Date, &t.Title, &t.Comment, &t.Repeat)
 	if err != nil {
-		return []byte{}, http.StatusInternalServerError, fmt.Errorf(`{"error":"ошибка записи %v"}`, err)
+		if err == sql.ErrNoRows {
+			return task.Task{}, ErrTaskNotFound
+		}
+		return task.Task{}, err
 	}
 
-	result, err := json.Marshal(task)
-	if err != nil {
-		return []byte{}, http.StatusInternalServerError, err
-	}
-
-	return result, http.StatusOK, nil
+	return t, nil
 }
 
-func (r *Repository) UpdateTask(req *http.Request) ([]byte, int, error) {
-	taskID, responseStatus, err := CheckTask(req)
+func (r *Repository) UpdateTask(t task.Task) error {
+	result, err := r.db.Exec(`UPDATE scheduler SET
+    date = ?, title = ?, comment = ?, repeat = ?
+    WHERE id = ?`,
+		t.Date, t.Title, t.Comment, t.Repeat, t.ID)
 	if err != nil {
-		return nil, responseStatus, err
+		return err
 	}
 
-	res, err := r.db.Exec(`UPDATE scheduler SET
-	date = :date, title = :title, comment = :comment, repeat = :repeat
-	WHERE id = :id`,
-		sql.Named("date", taskID.Date),
-		sql.Named("title", taskID.Title),
-		sql.Named("comment", taskID.Comment),
-		sql.Named("repeat", taskID.Repeat),
-		sql.Named("id", taskID.ID))
+	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return nil, http.StatusInternalServerError, formatError("ошибка при обновлении задачи", err)
+		return err
 	}
 
-	result, err := res.RowsAffected()
-	if err != nil {
-		return nil, http.StatusInternalServerError, formatError("ошибка при получении количества затронутых строк", err)
-	}
-	if result == 0 {
-		return nil, http.StatusBadRequest, errors.New(`{"error":"задача не найдена"}`)
+	if rowsAffected == 0 {
+		return ErrTaskNotFound
 	}
 
-	return []byte("{}"), http.StatusOK, nil
+	return nil
 }
 
 func (r *Repository) NextDate(now, day, repeat string) (string, error) {
@@ -207,48 +184,39 @@ func (r *Repository) NextDate(now, day, repeat string) (string, error) {
 	return nextDay, nil
 }
 
-func formatError(message string, err error) error {
-	return fmt.Errorf(`{"error":"%s: %v"}`, message, err)
-}
-func (r *Repository) ConditionalTask(db *sql.DB, search string) ([]task.Task, int, error) {
+func (r *Repository) ConditionalTask(search string) ([]task.Task, error) {
 	var tasks []task.Task
+	var rows *sql.Rows
+	var err error
 
-	var date bool
 	timeSearch, err := time.Parse("02.01.2006", search)
 	if err == nil {
-		date = true
-	}
-
-	var rows *sql.Rows
-
-	if date {
 		dateFormat := timeSearch.Format("20060102")
-		rows, err = db.Query(`SELECT id, date, title, comment, repeat FROM scheduler
-        WHERE date = :date LIMIT 20`,
-			sql.Named("date", dateFormat))
+		rows, err = r.db.Query(`SELECT id, date, title, comment, repeat FROM scheduler
+        WHERE date = ? LIMIT 20`, dateFormat)
 	} else {
-		rows, err = db.Query(`SELECT id, date, title, comment, repeat FROM scheduler
-    WHERE title LIKE :search OR comment LIKE :search ORDER BY date LIMIT 20`,
-			sql.Named("search", "%"+search+"%"))
+		rows, err = r.db.Query(`SELECT id, date, title, comment, repeat FROM scheduler
+        WHERE title LIKE ? OR comment LIKE ? ORDER BY date LIMIT 20`,
+			"%"+search+"%", "%"+search+"%")
 	}
 
 	if err != nil {
-		return nil, http.StatusInternalServerError, err
+		return nil, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		task := task.Task{}
+		var task task.Task
 		err := rows.Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 		if err != nil {
-			return nil, http.StatusInternalServerError, err
+			return nil, err
 		}
 		tasks = append(tasks, task)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, http.StatusInternalServerError, err
+		return nil, err
 	}
 
-	return tasks, http.StatusOK, nil
+	return tasks, nil
 }

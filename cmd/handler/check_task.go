@@ -11,21 +11,21 @@ import (
 	"time"
 )
 
-func CheckTask(req *http.Request) (task.Task, int, error) {
+func CheckTask(req *http.Request) (task.Task, error) {
 	var task task.Task
 	var buf bytes.Buffer
 
 	_, err := buf.ReadFrom(req.Body)
 	if err != nil {
-		return task, http.StatusInternalServerError, fmt.Errorf(`{"error":"ошибка чтения тела запроса"}`)
+		return task, fmt.Errorf(`{"error":"ошибка чтения тела запроса"}`)
 	}
 
 	if err = json.Unmarshal(buf.Bytes(), &task); err != nil {
-		return task, http.StatusBadRequest, fmt.Errorf(`{"error":"неправильный формат запроса"}`)
+		return task, fmt.Errorf(`{"error":"неправильный формат запроса"}`)
 	}
 
 	if task.Title == "" {
-		return task, http.StatusBadRequest, fmt.Errorf(`{"error":"отсутствует заголовок задачи"}`)
+		return task, fmt.Errorf(`{"error":"отсутствует заголовок задачи"}`)
 	}
 
 	now := time.Now()
@@ -35,11 +35,11 @@ func CheckTask(req *http.Request) (task.Task, int, error) {
 		task.Date = now.Format(date.DateFormat)
 	} else {
 		if matched, _ := regexp.MatchString(`^\d{8}$`, task.Date); !matched {
-			return task, http.StatusBadRequest, fmt.Errorf(`{"error":"неправильный формат даты"}`)
+			return task, fmt.Errorf(`{"error":"неправильный формат даты"}`)
 		}
 		dateParse, err := time.Parse(date.DateFormat, task.Date)
 		if err != nil {
-			return task, http.StatusBadRequest, fmt.Errorf(`{"error":"неверная дата"}`)
+			return task, fmt.Errorf(`{"error":"неверная дата"}`)
 		}
 
 		if dateParse.Before(now) {
@@ -48,7 +48,7 @@ func CheckTask(req *http.Request) (task.Task, int, error) {
 			} else {
 				nextDate, err := date.NextDate(now, task.Date, task.Repeat)
 				if err != nil {
-					return task, http.StatusBadRequest, fmt.Errorf(`{"error":"неверное правило повторения: %v"}`, err)
+					return task, fmt.Errorf(`{"error":"неверное правило повторения: %v"}`, err)
 				}
 				task.Date = nextDate
 			}
@@ -58,9 +58,9 @@ func CheckTask(req *http.Request) (task.Task, int, error) {
 	if task.Repeat != "" {
 		_, err := date.NextDate(now, task.Date, task.Repeat)
 		if err != nil {
-			return task, http.StatusBadRequest, fmt.Errorf(`{"error":"неправильное правило повтора: %v"}`, err)
+			return task, fmt.Errorf(`{"error":"неправильное правило повтора: %v"}`, err)
 		}
 	}
 
-	return task, http.StatusOK, nil
+	return task, nil
 }
